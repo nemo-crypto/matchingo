@@ -112,13 +112,13 @@ func (os *OrderSide) CanBuyOrderBeFilled(priceLevel, quantity fpdecimal.Decimal)
 	}
 
 	volume := fpdecimal.Zero
-	for _, price := range os.Prices() {
-		if price.LessThanOrEqual(priceLevel) && volume.LessThan(quantity) {
-			volume = volume.Add(os.prices[price].Volume())
-		} else {
-			break
+	os.orderedPrices.ForEach(func(price fpdecimal.Decimal) bool {
+		if !price.LessThanOrEqual(priceLevel) || !volume.LessThan(quantity) {
+			return false
 		}
-	}
+		volume = volume.Add(os.prices[price].Volume())
+		return volume.LessThan(quantity)
+	})
 
 	return volume.GreaterThanOrEqual(quantity)
 }
@@ -131,13 +131,13 @@ func (os *OrderSide) CanSellOrderBeFilled(priceLevel, quantity fpdecimal.Decimal
 	}
 
 	volume := fpdecimal.Zero
-	for _, price := range os.Prices() {
-		if price.GreaterThanOrEqual(priceLevel) && volume.LessThan(quantity) {
-			volume = volume.Add(os.prices[price].Volume())
-		} else {
-			break
+	os.orderedPrices.ForEach(func(price fpdecimal.Decimal) bool {
+		if !price.GreaterThanOrEqual(priceLevel) || !volume.LessThan(quantity) {
+			return false
 		}
-	}
+		volume = volume.Add(os.prices[price].Volume())
+		return volume.LessThan(quantity)
+	})
 
 	return volume.GreaterThanOrEqual(quantity)
 }

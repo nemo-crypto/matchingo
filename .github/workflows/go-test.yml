@@ -1,7 +1,7 @@
 name: Go checks
 on:
   push:
-    branches: ['improve/**']
+    branches: ['main', 'improve/**']
   pull_request:
 permissions:
   contents: read

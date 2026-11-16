@@ -274,9 +274,12 @@ func (ob *OrderBook) processLimitOrder(limitOrder *Order) (done *Done, err error
 }
 
 func (ob *OrderBook) processStopOrder(stopOrder *Order) (done *Done, err error) {
+	done = newDone(stopOrder)
+	if ob.checkOCO(stopOrder, done) {
+		return
+	}
 	ob.Stop.Append(stopOrder)
 	ob.orders[stopOrder.ID()] = stopOrder
-	done = newDone(stopOrder)
 	return
 }
 
@@ -368,7 +371,9 @@ func (ob *OrderBook) checkOCO(order *Order, done *Done) bool {
 
 	delete(ob.OCO, order.ID())
 
-	ob.cancelOCO(order.ID(), done)
+	// The incoming sibling has not been added to either book yet.
+	order.Cancel()
+	done.appendCanceled(order)
 
 	return true
 }
