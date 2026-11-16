@@ -69,39 +69,28 @@ func (sb *StopBook) Activate(price fpdecimal.Decimal) []Order {
 	return slice
 }
 
-// Remove removes Order from definite Price level
+// Remove removes the indexed Order with the given ID, or returns nil if absent.
 func (sb *StopBook) Remove(order *Order) *Order {
-	price := order.StopPrice().String()
-
-	priceQueue := sb.prices[price]
-	priceQueue.Remove(order)
-
-	if priceQueue.Len() == 0 {
-		delete(sb.prices, price)
+	if order == nil {
+		return nil
 	}
-
-	delete(sb.orders, order.ID())
-	sb.numOrders--
-	return order
+	return sb.RemoveByID(order.ID())
 }
 
-// RemoveByID removes Order by ID
+// RemoveByID removes Order by ID without changing state for missing orders.
 func (sb *StopBook) RemoveByID(id string) *Order {
-
 	order, ok := sb.orders[id]
 	if !ok {
 		return nil
 	}
 
-	price := order.StopPrice()
-	strPrice := price.String()
-
-	priceQueue, ok := sb.prices[strPrice]
-	if ok {
-		priceQueue.Remove(order)
-		if priceQueue.Len() == 0 {
-			delete(sb.prices, strPrice)
-		}
+	strPrice := order.StopPrice().String()
+	priceQueue := sb.prices[strPrice]
+	if priceQueue == nil || !priceQueue.Remove(order) {
+		return nil
+	}
+	if priceQueue.Len() == 0 {
+		delete(sb.prices, strPrice)
 	}
 
 	delete(sb.orders, id)

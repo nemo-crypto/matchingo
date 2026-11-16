@@ -10,7 +10,7 @@ A personal fork of [GOnevo/matchingo](https://github.com/GOnevo/matchingo), with
 
 适合学习、集成和验证内存订单簿、限价/市价撮合、止损限价与 OCO 订单逻辑。本仓库是社区贡献 fork，不是原作者的官方发行版，也不是包含账户余额、清结算和持久化的完整交易所系统。
 
-优化代码位于 `improve/reliability-performance-20261116`，独立上游贡献位于 `fix/reliability-review`。原有 Go module/import 路径保持 `github.com/gonevo/matchingo`；直接 `go get` 原项目不会自动取得本 fork 尚未合并的补丁。
+已验证的集成优化位于默认 `main` 分支；首轮独立上游贡献位于 `fix/reliability-review`。原有 Go module/import 路径保持 `github.com/gonevo/matchingo`；直接 `go get` 原项目不会自动取得本 fork 尚未合并的补丁。
 
 ## 优化说明
 
@@ -21,6 +21,9 @@ A personal fork of [GOnevo/matchingo](https://github.com/GOnevo/matchingo), with
 | 市价单没有可成交对手盘 | 报告未成交和取消状态 | 调用方能正确处理剩余量 |
 | 止损触发、OCO 撤单 | 清理索引、保留独立订单对象、只从所在订单簿撤单 | 修复订单生命周期不一致 |
 | 重复撤单、不存在的订单、越界队列索引 | 返回失败，不修改数量、深度和总量 | 边界调用更可预测 |
+| OCO 另一腿在主订单成交后才提交 | 限价单与止损单均立即标记取消，返回取消 ID | 防止无声丢弃或错误接纳迟到订单 |
+| 直接重复删除止损单 | 按已存储 ID 删除，nil 和不存在订单不改变状态 | 保护止损索引、数量和价格队列 |
+| FOK 可成交性预检查 | 按排序树遍历，满足数量或价格越界后停止 | 避免每次分配并复制全部价位 |
 | 队列转 slice 与查询深度 | 预分配结果，移除意外标准输出 | 减少分配，避免库函数污染应用日志 |
 
 对于按报价币种控制预算的市价买单，请使用 `NewMarketQuoteOrder`。`NewMarketOrder` 的数量按基础币种处理。不要把报价预算与基础币数量混用；以 `Done` 的实际成交与剩余量处理后续业务。
@@ -30,7 +33,7 @@ A personal fork of [GOnevo/matchingo](https://github.com/GOnevo/matchingo), with
 需要 Go 1.20 或以上；本 fork 在 Go 1.25.11 上验证。
 
 ```sh
-git clone --branch improve/reliability-performance-20261116 https://github.com/nemo-crypto/matchingo.git
+git clone https://github.com/nemo-crypto/matchingo.git
 cd matchingo
 go test ./...
 go run ./example
@@ -49,10 +52,12 @@ go mod edit -replace github.com/gonevo/matchingo=/absolute/path/to/matchingo
 ```sh
 go test -race ./... -count=1
 go vet ./...
-go test ./tests -run '^$' -bench BenchmarkQueueSliceReview -benchmem
+go test ./tests -run '^$' -bench 'BenchmarkQueueSliceReview|BenchmarkFOKDepthReview' -benchmem
 ```
 
 已通过全套 race 测试和 vet。1,000 条订单队列微基准的中位耗时为 39,066 → 17,388 ns/op，分配为 27 → 16 次；这只是该局部操作的结果，不代表整套交易系统吞吐量。
+
+新增 FOK 微基准中，10,000 个价位下每次预检查的价格数组分配由 81,920 B 降到 0 B。买单只需最优价位时，中位耗时从 38,966 降到 19.10 ns/op；遍历全部价位时从 80,873 降到 73,142 ns/op。两者都是局部预检查结果，不是撮合整单耗时。
 
 订单簿是可变内存结构，调用方仍需串行化操作。余额校验、持久化、精度溢出与结算舍入、生产资金安全需要另外验证。详见 [逐项审查报告](docs/reliability-performance-review.md)。
 

@@ -32,3 +32,24 @@ The book is single-threaded mutable state; callers must serialize access and mus
 ## Follow-up: safe removal boundaries
 
 `OrderSide.Remove` now returns nil for absent or nil orders without changing order counts, depth, or volume. `OrderQueue.Remove` rejects nil and `RemoveIndex` returns false for any out-of-range index instead of panicking. Successful removals retain their existing behavior. Regression tests cover bid/ask sides, absent price levels, repeated removal, nil inputs, invalid indexes, and successful cleanup. The tests failed on the prior version (incorrect removal result and index panic). Full race tests and `go vet ./...` passed. This does not make the mutable book thread-safe.
+
+## Follow-up: late OCO siblings, stop removal, and FOK traversal
+
+When an OCO primary fills before its sibling is submitted, the pending cancellation now marks the incoming sibling canceled and reports its ID. Stop-limit submission also checks that pending marker before storage. Both buy/sell directions and primary maker/taker fills are covered, with limit and stop siblings. Existing no-trade result quantity conventions are preserved.
+
+StopBook.Remove now delegates to the stored ID lookup and returns the indexed order. Nil, unknown IDs, repeated removals, and removal through a different object carrying the same ID no longer dereference missing price queues or corrupt counts. This does not permit callers to mutate resting orders.
+
+FOK prechecks traverse the sorted price tree directly, stopping as soon as the required quantity is found or the limit price is exceeded. They no longer allocate a snapshot of every price. Boundary tests verify buy/sell price limits and available volume; existing full matching tests remain in place.
+
+Validation: full `go test ./... -count=1`, `go test -race ./... -count=1`, and `go vet ./...` passed on Go 1.25.11 / Apple M5. The new lifecycle regressions failed on the previous version (eight missing OCO cancellations and a nil-stop removal panic).
+
+Reproduce the FOK-only benchmark with `go test ./tests -run '^$' -bench BenchmarkFOKDepthReview -benchmem -benchtime=100ms -count=3`. Setup is excluded from the timer. Median of three local repetitions:
+
+| 10,000 price levels | Before ns/op | After ns/op | Before B/op | After B/op |
+| --- | ---: | ---: | ---: | ---: |
+| Buy, quantity 1 | 38,966 | 19.10 | 81,920 | 0 |
+| Buy, quantity 10,000 | 80,873 | 73,142 | 81,920 | 0 |
+| Sell, quantity 1 | 37,043 | 34.18 | 81,920 | 0 |
+| Sell, quantity 10,000 | 78,014 | 72,950 | 81,920 | 0 |
+
+All measured cases went from one allocation per check to zero. These results isolate FOK prechecks, not order processing, concurrency, exchange throughput, or latency under load. Unsubmitted OCO siblings still leave pending cancellation markers until consumed; this change does not introduce marker expiry, ID generations, or a new stop-trigger policy.
