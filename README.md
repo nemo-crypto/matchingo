@@ -29,6 +29,24 @@ A personal fork of [GOnevo/matchingo](https://github.com/GOnevo/matchingo), with
 
 对于按报价币种控制预算的市价买单，请使用 `NewMarketQuoteOrder`。`NewMarketOrder` 的数量按基础币种处理。不要把报价预算与基础币数量混用；以 `Done` 的实际成交与剩余量处理后续业务。
 
+## 并发使用与 1000 QPS 验证
+
+多个 goroutine 共享同一交易对时，使用 `NewConcurrentOrderBook()`，其 `Process`、`CancelOrder`、`GetOrder`、`Depth`、`CalculateMarketPrice` 串行保护内部状态，并隔离订单对象。原 `NewOrderBook()` 仍要求调用方串行访问，禁止修改挂单对象。精度须在启动前一次性设置。
+
+```sh
+make test
+make race
+make vet
+make bench
+make stress
+# 带 1000 档背景挂单及 OCO/FOK 检查的持续压测
+go run ./cmd/loadtest -rate 1000 -duration 30s -workers 8 -depth 1000 -oco
+```
+
+本次修复定点运算中间溢出、OCO 导致 FOK 部分成交、微量报价成交零支出，并对空 ID、自引用 OCO、精度及总挂单容量增加校验。报价金额单现在按每次同价队列成交总量向上取整到报价最小单位；估值接口仍向下截断。接入方应核对舍入及 `ErrBookCapacity` 的处理。
+
+[完整边界、压测口径、实测数据与剩余限制](docs/optimization-1000qps.md)。本仓是内存库，库级操作吞吐不等同于 HTTP/RPC 服务 QPS。
+
 ## 本地运行
 
 需要 Go 1.20 或以上；本 fork 在 Go 1.25.11 上验证。
@@ -249,7 +267,9 @@ func main() {
 }
 ```
 
-### Benchmark
+### Historical upstream benchmark
+
+The following upstream result is historical, not the current fork acceptance measurement. See the report above for reproducible current benchmarks.
 
 ```shell
 goos: linux

@@ -25,7 +25,9 @@ Go 1.25.11, macOS arm64, Apple M5. `go test ./... -count=1`, `go test -race ./..
 
 This is a local microbenchmark, not exchange throughput or tail latency. Re-run on deployment hardware before sizing capacity.
 
-## Remaining boundaries
+## Remaining boundaries (historical review)
+
+The subsequent [1000 QPS optimization report](optimization-1000qps.md) supersedes the arithmetic, precision-validation and optional concurrent-wrapper limitations below. The raw mutable API remains serial-only.
 
 The book is single-threaded mutable state; callers must serialize access and must not mutate resting `Order` objects returned by lookup. Race-test success does not make concurrent access supported. This review does not establish correctness for fixed-point integer overflow, configurable decimal precision, sub-quote-unit settlement/rounding policies, persistence/replay, pre-trade balances, self-trade prevention or financial settlement. No production exchange or live funds were used.
 

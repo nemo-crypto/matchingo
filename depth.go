@@ -19,23 +19,16 @@ type Depth struct {
 
 // Depth returns Price levels and volume at Price level
 func (ob *OrderBook) Depth() *Depth {
-	var level *OrderQueue
-
 	depth := &Depth{
-		Ask: map[string]string{},
-		Bid: map[string]string{},
+		Ask: make(map[string]string, len(ob.asks.prices)),
+		Bid: make(map[string]string, len(ob.bids.prices)),
 	}
-
-	level = ob.asks.BestPriceQueue()
-	for level != nil {
+	// Depth is an unordered snapshot; avoid a tree search for each level.
+	for _, level := range ob.asks.prices {
 		depth.Ask[level.Price().String()] = level.Volume().String()
-		level = ob.asks.NextLevel(level.Price())
 	}
-
-	level = ob.bids.BestPriceQueue()
-	for level != nil {
+	for _, level := range ob.bids.prices {
 		depth.Bid[level.Price().String()] = level.Volume().String()
-		level = ob.bids.NextLevel(level.Price())
 	}
 	return depth
 }

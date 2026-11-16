@@ -1,6 +1,7 @@
 package matchingo
 
 import (
+	"math"
 	"strings"
 
 	"github.com/nikolaydubina/fpdecimal"
@@ -8,11 +9,13 @@ import (
 
 // OrderBook implements standard matching algorithm
 type OrderBook struct {
-	orders map[string]*Order
-	asks   *OrderSide
-	bids   *OrderSide
-	Stop   *StopBook
-	OCO    map[string]struct{}
+	ocoOrders int
+	volume    fpdecimal.Decimal
+	orders    map[string]*Order
+	asks      *OrderSide
+	bids      *OrderSide
+	Stop      *StopBook
+	OCO       map[string]struct{}
 }
 
 // NewOrderBook creates Orderbook object
@@ -47,6 +50,10 @@ func (ob *OrderBook) CancelOrder(orderID string) *Order {
 
 	if order.IsStopOrder() {
 		ob.Stop.Remove(order)
+		ob.volume = ob.volume.Sub(order.Quantity())
+		if order.oco != "" {
+			ob.ocoOrders--
+		}
 		delete(ob.orders, order.ID())
 	} else {
 		ob.deleteOrder(order)
@@ -59,6 +66,12 @@ func (ob *OrderBook) CancelOrder(orderID string) *Order {
 func (ob *OrderBook) Process(order *Order) (done *Done, err error) {
 	if order == nil || (!order.IsMarketOrder() && !order.IsLimitOrder() && !order.IsStopOrder()) {
 		return nil, ErrInvalidOrder
+	}
+	if order.ID() == "" || order.OCO() == order.ID() {
+		return nil, ErrInvalidOrder
+	}
+	if int(fpdecimal.FractionDigits) >= len(decimalScales) {
+		return nil, ErrInvalidPrecision
 	}
 	if order.Side() != Buy && order.Side() != Sell {
 		return nil, ErrInvalidSide
@@ -79,6 +92,12 @@ func (ob *OrderBook) Process(order *Order) (done *Done, err error) {
 		return nil, ErrOrderExists
 	}
 
+	// Reserve headroom before any matching: every possible resting/activated
+	// price-level total and FOK sum must remain representable.
+	if !order.IsMarketOrder() && order.Quantity().Scaled() > math.MaxInt64-ob.volume.Scaled() {
+		return nil, ErrBookCapacity
+	}
+
 	if order.IsMarketOrder() {
 		return ob.processMarketOrder(order)
 	}
@@ -97,6 +116,9 @@ func (ob *OrderBook) Process(order *Order) (done *Done, err error) {
 // CalculateMarketPrice returns total market Price for requested quantity
 func (ob *OrderBook) CalculateMarketPrice(side Side, quantity fpdecimal.Decimal) (price fpdecimal.Decimal, err error) {
 	price = fpdecimal.Zero
+	if int(fpdecimal.FractionDigits) >= len(decimalScales) {
+		return price, ErrInvalidPrecision
+	}
 	if side != Buy && side != Sell {
 		return price, ErrInvalidSide
 	}
@@ -117,14 +139,17 @@ func (ob *OrderBook) CalculateMarketPrice(side Side, quantity fpdecimal.Decimal)
 	for quantity.GreaterThan(fpdecimal.Zero) && level != nil {
 		levelVolume := level.Volume()
 		levelPrice := level.Price()
-		if quantity.GreaterThanOrEqual(levelVolume) {
-			price = price.Add(levelPrice.Mul(levelVolume))
-			quantity = quantity.Sub(levelVolume)
-			level = iter(levelPrice)
-		} else {
-			price = price.Add(levelPrice.Mul(quantity))
-			quantity = fpdecimal.Zero
+		consumed := quantity
+		if consumed.GreaterThan(levelVolume) {
+			consumed = levelVolume
 		}
+		cost, ok := quoteCost(consumed, levelPrice, false)
+		if !ok || cost.Scaled() > math.MaxInt64-price.Scaled() {
+			return fpdecimal.Zero, ErrArithmeticOverflow
+		}
+		price = price.Add(cost)
+		quantity = quantity.Sub(consumed)
+		level = iter(levelPrice)
 	}
 
 	if quantity.GreaterThan(fpdecimal.Zero) {
@@ -146,6 +171,10 @@ func (ob *OrderBook) deleteStopOrderByID(orderID string) *Order {
 }
 
 func (ob *OrderBook) deleteOrder(order *Order) *Order {
+	ob.volume = ob.volume.Sub(order.Quantity())
+	if order.oco != "" {
+		ob.ocoOrders--
+	}
 	delete(ob.orders, order.ID())
 
 	if order.Side() == Buy {
@@ -241,7 +270,8 @@ func (ob *OrderBook) processLimitOrder(limitOrder *Order) (done *Done, err error
 	}
 
 	if limitOrder.TIF() == FOK {
-		if !side.CanOrderBeFilled(limitOrder.Side(), limitOrder.price, quantity) {
+		if !side.CanOrderBeFilled(limitOrder.Side(), limitOrder.price, quantity) ||
+			(ob.ocoOrders > 0 && !ob.canFillWithOCO(limitOrder)) {
 			limitOrder.Cancel()
 			done.appendCanceled(limitOrder)
 			return
@@ -285,12 +315,20 @@ func (ob *OrderBook) processStopOrder(stopOrder *Order) (done *Done, err error) 
 		return
 	}
 	ob.Stop.Append(stopOrder)
+	ob.volume = ob.volume.Add(stopOrder.Quantity())
 	ob.orders[stopOrder.ID()] = stopOrder
+	if stopOrder.oco != "" {
+		ob.ocoOrders++
+	}
 	return
 }
 
 func (ob *OrderBook) appendLimitOrder(order *Order) {
 	if order.IsLimitOrder() {
+		if ob.orders[order.ID()] == nil {
+			ob.volume = ob.volume.Add(order.Quantity())
+		}
+
 		if order.Side() == Buy {
 			ob.bids.Append(order)
 		}
@@ -298,6 +336,9 @@ func (ob *OrderBook) appendLimitOrder(order *Order) {
 			ob.asks.Append(order)
 		}
 
+		if order.oco != "" && ob.orders[order.ID()] == nil {
+			ob.ocoOrders++
+		}
 		ob.orders[order.ID()] = order
 
 		return
@@ -322,7 +363,8 @@ func (ob *OrderBook) activateStopOrders(price fpdecimal.Decimal) []*Order {
 func (ob *OrderBook) processQueueQuote(bestPrice *OrderQueue, quantity fpdecimal.Decimal, done *Done) fpdecimal.Decimal {
 	baseQuantity := ob.adaptQuantityBase(quantity, bestPrice.Price())
 	remaining := ob.processQueue(bestPrice, baseQuantity, done)
-	spent := ob.adaptQuantityQuote(baseQuantity.Sub(remaining), bestPrice.Price())
+	// Charge the filled base quantity rounded UP to a quote unit: never give free fills.
+	spent, _ := quoteCost(baseQuantity.Sub(remaining), bestPrice.Price(), true)
 	return quantity.Sub(spent)
 }
 
@@ -337,6 +379,7 @@ func (ob *OrderBook) processQueue(orderQueue *OrderQueue, quantity fpdecimal.Dec
 		if quantity.LessThan(orderQuantity) {
 			done.appendOrder(o, quantity, price)
 			orderQueue.UpdateVolume(quantity)
+			ob.volume = ob.volume.Sub(quantity)
 			o.DecreaseQuantity(quantity)
 			quantity = fpdecimal.Zero
 		} else {
@@ -358,11 +401,8 @@ func (ob *OrderBook) processQueue(orderQueue *OrderQueue, quantity fpdecimal.Dec
 }
 
 func (ob *OrderBook) adaptQuantityBase(quantity, price fpdecimal.Decimal) fpdecimal.Decimal {
-	return quantity.Div(price)
-}
-
-func (ob *OrderBook) adaptQuantityQuote(quantity, price fpdecimal.Decimal) fpdecimal.Decimal {
-	return quantity.Mul(price)
+	n, _ := mulDiv(uint64(quantity.Scaled()), decimalScales[fpdecimal.FractionDigits], uint64(price.Scaled()), false)
+	return fpdecimal.FromIntScaled(n)
 }
 
 // checkOCO removes Order if OCO reference is already Processed
@@ -402,6 +442,10 @@ func (ob *OrderBook) cancelOCO(orderID string, done *Done) {
 
 	if canceledOrder.IsStopOrder() {
 		ob.deleteStopOrderByID(orderID)
+		ob.volume = ob.volume.Sub(canceledOrder.Quantity())
+		if canceledOrder.oco != "" {
+			ob.ocoOrders--
+		}
 		delete(ob.orders, orderID)
 	} else {
 		ob.deleteOrder(canceledOrder)

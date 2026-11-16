@@ -16,5 +16,8 @@ func FromFloat(num float64) fpdecimal.Decimal {
 
 // SetDecimalFraction set precision
 func SetDecimalFraction(precision int) {
+	if precision < 0 || precision >= len(decimalScales) {
+		panic(ErrInvalidPrecision)
+	}
 	fpdecimal.FractionDigits = uint8(precision)
 }

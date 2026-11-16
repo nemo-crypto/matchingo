@@ -38,6 +38,9 @@ func (oq *OrderQueue) Volume() fpdecimal.Decimal {
 
 // First returns top Order in queue
 func (oq *OrderQueue) First() *Order {
+	if oq.Orders.Len() == 0 {
+		return nil
+	}
 	return oq.Orders.Front()
 }
 

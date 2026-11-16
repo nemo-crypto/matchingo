@@ -9,7 +9,7 @@ import (
 
 // StopBook implements facade to operations with Stop Orders
 type StopBook struct {
-	prices    map[string]*OrderQueue
+	prices    map[fpdecimal.Decimal]*OrderQueue
 	orders    map[string]*Order
 	numOrders int
 }
@@ -17,7 +17,7 @@ type StopBook struct {
 // NewStopBook creates new OrderSide manager
 func NewStopBook() *StopBook {
 	return &StopBook{
-		prices: map[string]*OrderQueue{},
+		prices: map[fpdecimal.Decimal]*OrderQueue{},
 		orders: map[string]*Order{},
 	}
 }
@@ -35,12 +35,11 @@ func (sb *StopBook) Append(o *Order) {
 	}
 
 	price := o.StopPrice()
-	strPrice := price.String()
 
-	priceQueue, ok := sb.prices[strPrice]
+	priceQueue, ok := sb.prices[price]
 	if !ok {
 		priceQueue = NewOrderQueue(price)
-		sb.prices[strPrice] = priceQueue
+		sb.prices[price] = priceQueue
 	}
 	priceQueue.Append(o)
 	sb.orders[o.ID()] = o
@@ -49,9 +48,8 @@ func (sb *StopBook) Append(o *Order) {
 
 // Activate Orders by Stop Price
 func (sb *StopBook) Activate(price fpdecimal.Decimal) []Order {
-	strPrice := price.String()
 
-	priceQueue, ok := sb.prices[strPrice]
+	priceQueue, ok := sb.prices[price]
 	if !ok {
 		return nil
 	}
@@ -62,7 +60,7 @@ func (sb *StopBook) Activate(price fpdecimal.Decimal) []Order {
 	}
 
 	if priceQueue.Len() == 0 {
-		delete(sb.prices, strPrice)
+		delete(sb.prices, price)
 	}
 
 	sb.numOrders = sb.numOrders - len(slice)
@@ -84,13 +82,13 @@ func (sb *StopBook) RemoveByID(id string) *Order {
 		return nil
 	}
 
-	strPrice := order.StopPrice().String()
-	priceQueue := sb.prices[strPrice]
+	price := order.StopPrice()
+	priceQueue := sb.prices[price]
 	if priceQueue == nil || !priceQueue.Remove(order) {
 		return nil
 	}
 	if priceQueue.Len() == 0 {
-		delete(sb.prices, strPrice)
+		delete(sb.prices, price)
 	}
 
 	delete(sb.orders, id)
