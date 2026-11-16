@@ -199,3 +199,7 @@ Transactions per second (avg): 1139342.359570
 Made with ❤️ in Ukraine
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/vanodevium)
+
+### Fork reliability review
+
+See [the review and validation report](docs/reliability-performance-review.md) for input validation, quote-budget handling, regression tests, and measured allocation improvements.

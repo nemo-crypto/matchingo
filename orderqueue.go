@@ -82,7 +82,10 @@ func (oq *OrderQueue) RemoveIndex(index int) bool {
 
 // Slice returns slice of Orders, queue will be empty
 func (oq *OrderQueue) Slice() []Order {
-	var slice []Order
+	if oq.Orders.Len() == 0 {
+		return nil
+	}
+	slice := make([]Order, 0, oq.Orders.Len())
 	for oq.Orders.Len() > 0 {
 		order := oq.Orders.PopFront()
 		oq.volume = oq.volume.Sub(order.Quantity())
