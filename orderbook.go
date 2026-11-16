@@ -97,6 +97,12 @@ func (ob *OrderBook) Process(order *Order) (done *Done, err error) {
 // CalculateMarketPrice returns total market Price for requested quantity
 func (ob *OrderBook) CalculateMarketPrice(side Side, quantity fpdecimal.Decimal) (price fpdecimal.Decimal, err error) {
 	price = fpdecimal.Zero
+	if side != Buy && side != Sell {
+		return price, ErrInvalidSide
+	}
+	if quantity.LessThan(fpdecimal.Zero) {
+		return price, ErrInvalidQuantity
+	}
 
 	var orders *OrderSide
 	if side == Buy {
