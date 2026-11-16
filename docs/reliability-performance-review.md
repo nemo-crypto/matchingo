@@ -53,3 +53,7 @@ Reproduce the FOK-only benchmark with `go test ./tests -run '^$' -bench Benchmar
 | Sell, quantity 10,000 | 78,014 | 72,950 | 81,920 | 0 |
 
 All measured cases went from one allocation per check to zero. These results isolate FOK prechecks, not order processing, concurrency, exchange throughput, or latency under load. Unsubmitted OCO siblings still leave pending cancellation markers until consumed; this change does not introduce marker expiry, ID generations, or a new stop-trigger policy.
+
+## Follow-up: submitted versus constructor quantity
+
+Done now snapshots Order.Quantity at submission instead of OriginalQty. Using SetQuantity before submitting a fresh order previously made fill totals refer to the constructor value, and an unmatched limit could be restored to that old value. OriginalQty remains unchanged for historical inspection. Regression tests cover reduced/increased quantities, limit/base-market/quote-market orders, and empty/partial/full liquidity; all 18 cases failed before the fix. Full tests, race tests, and vet pass. This does not authorize mutating orders while they rest in the book.
