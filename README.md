@@ -1,3 +1,71 @@
+# Matchingo — Go Order Matching Engine
+
+A personal fork of [GOnevo/matchingo](https://github.com/GOnevo/matchingo), with regression-tested fixes for order validation, quote accounting, stop/OCO lifecycle, and queue handling. **Go 语言订单撮合引擎：侧重输入校验、余额计算与边界行为修复。**
+
+## 使用导航
+
+[项目定位](#项目定位) · [优化说明](#优化说明) · [本地运行](#本地运行) · [验证与边界](#验证与边界) · [原项目文档](#原项目文档)
+
+## 项目定位
+
+适合学习、集成和验证内存订单簿、限价/市价撮合、止损限价与 OCO 订单逻辑。本仓库是社区贡献 fork，不是原作者的官方发行版，也不是包含账户余额、清结算和持久化的完整交易所系统。
+
+优化代码位于 `improve/reliability-performance-20261116`，独立上游贡献位于 `fix/reliability-review`。原有 Go module/import 路径保持 `github.com/gonevo/matchingo`；直接 `go get` 原项目不会自动取得本 fork 尚未合并的补丁。
+
+## 优化说明
+
+| 场景 | 修改后的行为 | 对使用者的意义 |
+| --- | --- | --- |
+| nil、无效方向、已取消订单、重复活跃 ID | 在修改订单簿前返回错误 | 避免错误输入导致崩溃或意外撮合 |
+| 报价预算不能整除成交价格 | 保留未花费余额，并报告剩余量 | 固定精度截断不再直接吞掉剩余预算 |
+| 市价单没有可成交对手盘 | 报告未成交和取消状态 | 调用方能正确处理剩余量 |
+| 止损触发、OCO 撤单 | 清理索引、保留独立订单对象、只从所在订单簿撤单 | 修复订单生命周期不一致 |
+| 重复撤单、不存在的订单、越界队列索引 | 返回失败，不修改数量、深度和总量 | 边界调用更可预测 |
+| 队列转 slice 与查询深度 | 预分配结果，移除意外标准输出 | 减少分配，避免库函数污染应用日志 |
+
+对于按报价币种控制预算的市价买单，请使用 `NewMarketQuoteOrder`。`NewMarketOrder` 的数量按基础币种处理。不要把报价预算与基础币数量混用；以 `Done` 的实际成交与剩余量处理后续业务。
+
+## 本地运行
+
+需要 Go 1.20 或以上；本 fork 在 Go 1.25.11 上验证。
+
+```sh
+git clone --branch improve/reliability-performance-20261116 https://github.com/nemo-crypto/matchingo.git
+cd matchingo
+go test ./...
+go run ./example
+```
+
+若已克隆，先确认当前分支及工作区，再更新相应分支。应用项目试用本地 fork 可使用 Go module 的本地替换，例如：
+
+```sh
+go mod edit -replace github.com/gonevo/matchingo=/absolute/path/to/matchingo
+```
+
+替换路径应指向你的实际 checkout；不应将个人机器的绝对路径直接提交给团队。
+
+## 验证与边界
+
+```sh
+go test -race ./... -count=1
+go vet ./...
+go test ./tests -run '^$' -bench BenchmarkQueueSliceReview -benchmem
+```
+
+已通过全套 race 测试和 vet。1,000 条订单队列微基准的中位耗时为 39,066 → 17,388 ns/op，分配为 27 → 16 次；这只是该局部操作的结果，不代表整套交易系统吞吐量。
+
+订单簿是可变内存结构，调用方仍需串行化操作。余额校验、持久化、精度溢出与结算舍入、生产资金安全需要另外验证。详见 [逐项审查报告](docs/reliability-performance-review.md)。
+
+## 贡献与来源
+
+[本次上游 PR #6](https://github.com/GOnevo/matchingo/pull/6)；之前的止损/OCO 修复见 [#3](https://github.com/GOnevo/matchingo/pull/3)、[#4](https://github.com/GOnevo/matchingo/pull/4)、[#5](https://github.com/GOnevo/matchingo/pull/5)。
+
+修复与回归测试会向原项目提交 PR；提交不等于上游已接受。保留原项目署名和许可证，见 [LICENSE](LICENSE.md)。本 fork 的 [PR 列表](https://github.com/nemo-crypto/matchingo/pulls) 记录集成情况。
+
+## 原项目文档
+
+以下保留原项目的 API 介绍；其原始安装命令指向上游，使用本 fork 请参考上方步骤。
+
 [![Go Report Card](https://goreportcard.com/badge/github.com/gonevo/matchingo)](https://goreportcard.com/report/github.com/gonevo/matchingo)
 ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/gonevo/matchingo)
 ![GitHub](https://img.shields.io/github/license/gonevo/matchingo)
@@ -199,3 +267,7 @@ Transactions per second (avg): 1139342.359570
 Made with ❤️ in Ukraine
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/vanodevium)
+
+### Fork reliability review
+
+See [the review and validation report](docs/reliability-performance-review.md) for input validation, quote-budget handling, regression tests, and measured allocation improvements.
