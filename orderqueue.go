@@ -54,6 +54,9 @@ func (oq *OrderQueue) UpdateVolume(consumed fpdecimal.Decimal) {
 
 // Remove removes Order from the queue
 func (oq *OrderQueue) Remove(order *Order) bool {
+	if order == nil {
+		return false
+	}
 	index := oq.Orders.Index(func(o *Order) bool {
 		return o.ID() == order.ID()
 	})
@@ -70,7 +73,7 @@ func (oq *OrderQueue) RemoveByID(id string) bool {
 
 // RemoveIndex removes Order from the queue
 func (oq *OrderQueue) RemoveIndex(index int) bool {
-	if index != -1 {
+	if index >= 0 && index < oq.Orders.Len() {
 		order := oq.Orders.At(index)
 		oq.volume = oq.volume.Sub(order.Quantity())
 		oq.Orders.Remove(index)

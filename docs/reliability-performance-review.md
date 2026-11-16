@@ -28,3 +28,7 @@ This is a local microbenchmark, not exchange throughput or tail latency. Re-run 
 ## Remaining boundaries
 
 The book is single-threaded mutable state; callers must serialize access and must not mutate resting `Order` objects returned by lookup. Race-test success does not make concurrent access supported. This review does not establish correctness for fixed-point integer overflow, configurable decimal precision, sub-quote-unit settlement/rounding policies, persistence/replay, pre-trade balances, self-trade prevention or financial settlement. No production exchange or live funds were used.
+
+## Follow-up: safe removal boundaries
+
+`OrderSide.Remove` now returns nil for absent or nil orders without changing order counts, depth, or volume. `OrderQueue.Remove` rejects nil and `RemoveIndex` returns false for any out-of-range index instead of panicking. Successful removals retain their existing behavior. Regression tests cover bid/ask sides, absent price levels, repeated removal, nil inputs, invalid indexes, and successful cleanup. The tests failed on the prior version (incorrect removal result and index panic). Full race tests and `go vet ./...` passed. This does not make the mutable book thread-safe.
