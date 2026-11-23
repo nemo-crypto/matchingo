@@ -184,3 +184,28 @@ func BenchmarkFOKUnrelatedOCO(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkMarketEstimate(b *testing.B) {
+	book := m.NewOrderBook()
+	for level := 1; level <= 1000; level++ {
+		order := m.NewLimitOrder(strconv.Itoa(level), m.Sell, m.FromInt(1), m.FromInt(level), m.GTC, "")
+		if _, err := book.Process(order); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	for _, levels := range []int{1, 100, 1000} {
+		b.Run(strconv.Itoa(levels), func(b *testing.B) {
+			quantity := m.FromInt(levels)
+			want := m.FromInt(levels * (levels + 1) / 2)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				price, err := book.CalculateMarketPrice(m.Buy, quantity)
+				if err != nil || price != want {
+					b.Fatalf("estimate = %v, %v; want %v", price, err, want)
+				}
+			}
+		})
+	}
+}

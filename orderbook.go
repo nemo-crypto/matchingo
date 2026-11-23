@@ -133,23 +133,28 @@ func (ob *OrderBook) CalculateMarketPrice(side Side, quantity fpdecimal.Decimal)
 		orders = ob.bids
 	}
 
-	level := orders.BestPriceQueue()
-	iter := orders.NextLevel
+	if quantity == fpdecimal.Zero {
+		return price, nil
+	}
 
-	for quantity.GreaterThan(fpdecimal.Zero) && level != nil {
-		levelVolume := level.Volume()
-		levelPrice := level.Price()
+	// Visit price levels in matching order without searching the tree again for each level.
+	orders.orderedPrices.ForEach(func(levelPrice fpdecimal.Decimal) bool {
+		levelVolume := orders.prices[levelPrice].Volume()
 		consumed := quantity
 		if consumed.GreaterThan(levelVolume) {
 			consumed = levelVolume
 		}
 		cost, ok := quoteCost(consumed, levelPrice, false)
 		if !ok || cost.Scaled() > math.MaxInt64-price.Scaled() {
-			return fpdecimal.Zero, ErrArithmeticOverflow
+			price, err = fpdecimal.Zero, ErrArithmeticOverflow
+			return false
 		}
 		price = price.Add(cost)
 		quantity = quantity.Sub(consumed)
-		level = iter(levelPrice)
+		return quantity.GreaterThan(fpdecimal.Zero)
+	})
+	if err != nil {
+		return price, err
 	}
 
 	if quantity.GreaterThan(fpdecimal.Zero) {
